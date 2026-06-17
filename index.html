@@ -1990,6 +1990,7 @@ let currentIntrantFilter = 'all';
 let varietesData = [];
 let agriData    = [];
 let p2Date = new Date();
+let clientsData = [];
 
 /* ══════════════════ AUTH ══════════════════ */
 (async()=>{ const {data:{session}} = await sb.auth.getSession(); if(session) await boot(session.user); })();
@@ -2336,7 +2337,7 @@ function switchBddTab(tab){
 }
 
 /* CLIENTS */
-let clientsData=[],editClientId=null;
+let editClientId=null;
 async function loadClients(){const {data}=await sb.from('db_clients').select('*').order('nom');clientsData=data||[];renderClients(clientsData);document.getElementById('kpi-clients').textContent=clientsData.length;}
 function renderClients(data){
   const tb=document.getElementById('clients-tbody');
