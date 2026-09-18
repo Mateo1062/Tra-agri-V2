@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Traç'Agri — Demandes tablette</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, Arial, sans-serif; background: #f3f1ea; color: #1c2b1a; padding: 16px; }
+  h1 { font-size: 20px; }
+  .card { background: #fff; border: 1px solid #ddd6c3; border-radius: 8px; padding: 14px; margin-bottom: 12px; }
+  .card.bon_sortie { border-left: 6px solid #d97e0a; }
+  .card.frigo_case_occupee { border-left: 6px solid #2980b9; }
+  .titre { font-weight: bold; margin-bottom: 4px; }
+  .meta { color: #6b6b5a; font-size: 13px; margin-bottom: 8px; }
+  pre { background: #f7f5ec; padding: 8px; border-radius: 6px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+  button { background: #1c2b1a; color: #fff; border: none; padding: 10px 14px; border-radius: 5px; cursor: pointer; font-size: 15px; }
+  button.secondary { background: #999; }
+  #loginBox { max-width: 360px; margin: 60px auto; background: #fff; padding: 22px; border-radius: 8px; border: 1px solid #ddd6c3; }
+  input { width: 100%; padding: 10px; margin: 6px 0 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 15px; }
+  #err { color: #c0392b; font-size: 14px; }
+  .hidden { display: none; }
+  #toggleDone { margin: 10px 0; background: none; color: #1c2b1a; text-decoration: underline; padding: 4px 0; }
+</style>
+</head>
+<body>
+
+<div id="loginBox">
+  <h1>Traç'Agri — Demandes tablette</h1>
+  <input type="email" id="email" placeholder="Email">
+  <input type="password" id="password" placeholder="Mot de passe">
+  <button onclick="login()">Se connecter</button>
+  <div id="err"></div>
+</div>
+
+<div id="app" class="hidden">
+  <h1>📨 Demandes envoyées depuis la tablette</h1>
+  <p class="meta">Actions demandées depuis la tablette du frigo que celle-ci ne peut pas terminer elle-même — à finaliser ici puis marquer traité.</p>
+  <div id="list"><p>Chargement…</p></div>
+  <button id="toggleDone" class="secondary" onclick="toggleDone()">Afficher les demandes déjà traitées</button>
+</div>
+
+<script>
+var SUPABASE_URL = 'https://gzyteuuttgiuyefholhj.supabase.co';
+var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd6eXRldXV0dGdpdXllZmhvbGhqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2NTQxMzEsImV4cCI6MjA5NzIzMDEzMX0.qXVQCTuvGSYpkriuJ8mlM8wjytNSjp3mpNGNQJub8tU';
+var SESSION_KEY = 'tracagri_demandes_session';
+var session = null;
+var showDone = false;
+
+function saveSession(s) { session = s; try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch (e) {} }
+function loadSession() { try { var r = localStorage.getItem(SESSION_KEY); if (r) session = JSON.parse(r); } catch (e) {} }
+function clearSession() { session = null; try { localStorage.removeItem(SESSION_KEY); } catch (e) {} }
+
+async function api(method, path, body, extraHeaders) {
+  var headers = { apikey: SUPABASE_ANON_KEY, 'Content-Type': 'application/json' };
+  if (session && session.access_token) headers.Authorization = 'Bearer ' + session.access_token;
+  if (extraHeaders) Object.assign(headers, extraHeaders);
+  var res = await fetch(SUPABASE_URL + path, { method: method, headers: headers, body: body ? JSON.stringify(body) : undefined });
+  if (res.status === 401 && session && session.refresh_token) {
+    var r = await fetch(SUPABASE_URL + '/auth/v1/token?grant_type=refresh_token', {
+      method: 'POST', headers: { apikey: SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: session.refresh_token }),
+    });
+    var rd = await r.json();
+    if (rd && rd.access_token) {
+      saveSession({ access_token: rd.access_token, refresh_token: rd.refresh_token, expires_at: Date.now() + (rd.expires_in || 3600) * 1000, email: session.email });
+      return api(method, path, body, extraHeaders);
+    }
+    clearSession(); showLogin('Session expirée, reconnecte-toi.');
+    throw new Error('unauthorized');
+  }
+  var data = null;
+  try { data = await res.json(); } catch (e) {}
+  if (!res.ok) throw new Error((data && data.message) || ('HTTP ' + res.status));
+  return data;
+}
+
+function showLogin(msg) {
+  document.getElementById('app').className = 'hidden';
+  document.getElementById('loginBox').className = '';
+  document.getElementById('err').textContent = msg || '';
+}
+function showApp() {
+  document.getElementById('loginBox').className = 'hidden';
+  document.getElementById('app').className = '';
+  loadList();
+}
+
+async function login() {
+  var email = document.getElementById('email').value.trim();
+  var password = document.getElementById('password').value;
+  document.getElementById('err').textContent = '';
+  try {
+    var res = await fetch(SUPABASE_URL + '/auth/v1/token?grant_type=password', {
+      method: 'POST', headers: { apikey: SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email, password: password }),
+    });
+    var data = await res.json();
+    if (!res.ok || !data.access_token) throw new Error('Connexion refusée');
+    saveSession({ access_token: data.access_token, refresh_token: data.refresh_token, expires_at: Date.now() + (data.expires_in || 3600) * 1000, email: email });
+    showApp();
+  } catch (e) {
+    document.getElementById('err').textContent = 'Connexion refusée (email/mot de passe incorrect ?).';
+  }
+}
+
+function toggleDone() {
+  showDone = !showDone;
+  document.getElementById('toggleDone').textContent = showDone ? 'Masquer les demandes traitées' : 'Afficher les demandes déjà traitées';
+  loadList();
+}
+
+function fmtDateTime(iso) {
+  if (!iso) return '';
+  var d = new Date(iso);
+  return d.toLocaleString('fr-FR');
+}
+
+async function loadList() {
+  document.getElementById('list').innerHTML = '<p>Chargement…</p>';
+  try {
+    var filter = showDone ? 'status=eq.traite' : 'status=eq.pending';
+    var rows = await api('GET', '/rest/v1/tablet_requests?select=*&' + filter + '&order=created_at.desc');
+    render(rows || []);
+  } catch (e) {
+    document.getElementById('list').innerHTML = '<p>Erreur de chargement : ' + e.message + '</p>';
+  }
+}
+
+function render(rows) {
+  var list = document.getElementById('list');
+  if (!rows.length) {
+    list.innerHTML = '<p>' + (showDone ? 'Aucune demande traitée.' : '✅ Aucune demande en attente.') + '</p>';
+    return;
+  }
+  var html = '';
+  rows.forEach(function (r) {
+    html += '<div class="card ' + r.type + '">';
+    html += '<div class="titre">' + escapeHtml(r.titre) + '</div>';
+    html += '<div class="meta">' + fmtDateTime(r.created_at) + ' · demandé par ' + escapeHtml(r.created_by || '?') + '</div>';
+    if (r.details) html += '<div>' + escapeHtml(r.details) + '</div>';
+    if (r.payload) html += '<pre>' + escapeHtml(JSON.stringify(r.payload, null, 2)) + '</pre>';
+    if (r.status === 'pending') {
+      html += '<button onclick="markDone(\'' + r.id + '\')">✅ Marquer traité</button>';
+    } else {
+      html += '<div class="meta">Traité le ' + fmtDateTime(r.done_at) + ' par ' + escapeHtml(r.done_by || '?') + '</div>';
+    }
+    html += '</div>';
+  });
+  list.innerHTML = html;
+}
+
+function escapeHtml(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+async function markDone(id) {
+  if (!confirm('Marquer cette demande comme traitée ?')) return;
+  try {
+    await api('PATCH', '/rest/v1/tablet_requests?id=eq.' + encodeURIComponent(id),
+      { status: 'traite', done_at: new Date().toISOString(), done_by: session.email },
+      { Prefer: 'return=minimal' });
+    loadList();
+  } catch (e) {
+    alert('Échec : ' + e.message);
+  }
+}
+
+loadSession();
+if (session && session.access_token) showApp(); else showLogin('');
+</script>
+</body>
+</html>
