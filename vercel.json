@@ -1,0 +1,24 @@
+{
+  "rewrites": [
+    { "source": "/tablette.html", "destination": "/tablette.html" },
+    { "source": "/demandes-tablette.html", "destination": "/demandes-tablette.html" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "crons": [
+    { "path": "/api/send-facture-reminders", "schedule": "0 6 * * *" },
+    { "path": "/api/backup-weekly", "schedule": "0 3 * * 0" },
+    { "path": "/api/check-meteo-alertes", "schedule": "0 6 * * *" },
+    { "path": "/api/snapshot-frigos-daily", "schedule": "0 20 * * *" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Permissions-Policy", "value": "camera=(self), geolocation=(self), microphone=()" }
+      ]
+    }
+  ]
+}
